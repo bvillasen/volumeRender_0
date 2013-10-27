@@ -26,17 +26,19 @@ nHeight = 128
 nDepth = 128
 nData = nWidth*nHeight*nDepth
 
-plotData_h = np.loadtxt(volRenderDirectory + "/vortex3D.dat")
-globals()["stepFunc"]=None
+plotData_h = np.random.rand(nData)
+
+def stepFunc():
+  print "Default step function"
+
+#globals()["stepFunc"] = stepFunction
 
 width_GL = 512
 height_GL = 512
-volumeSize = nData #unsigned char is 1 bytes
-
 
 dataMax = plotData_h.max()
 plotData_h = (256.*plotData_h/dataMax).astype(np.uint8).reshape(nDepth, nHeight, nWidth)
-plotDataArray_d = None
+plotData_dArray = None
 transferFuncArray_d = None
 
 viewRotation =  np.zeros(3).astype(np.float32)
@@ -99,11 +101,7 @@ def render():
   cuda_PBO_map = cuda_PBO.map()
   cuda_PBO_ptr, cuda_PBO_size = cuda_PBO_map.device_ptr_and_size()
   cuda.memset_d32( cuda_PBO_ptr, 0, width_GL*height_GL )
-  #print "PTR: ", cuda_PBO_ptr
-  #print "size: ", cuda_PBO_size
-  #print "PTR: ", np.uintp(cuda_PBO_ptr)
   renderKernel( np.intp(cuda_PBO_ptr), np.int32(width_GL), np.int32(height_GL), density, brightness, transferOffset, transferScale, grid=grid2D_GL, block = block2D_GL, texrefs=[tex, transferTex] )
-  #print "Kerlel Launched"
   cuda_PBO_map.unmap()
   
 def display():
@@ -111,7 +109,8 @@ def display():
   global gl_tex, gl_PBO
   global timer
   
-  globals()["stepFunc"]
+  stepFunc()
+  
   
   timer = time.time()
   modelView = np.ones(16)
@@ -191,7 +190,7 @@ def initPixelBuffer():
   glBufferDataARB(glew.GL_PIXEL_UNPACK_BUFFER_ARB, width_GL*height_GL*4, None, GL_STREAM_DRAW_ARB)
   glBindBufferARB(glew.GL_PIXEL_UNPACK_BUFFER_ARB, 0)
   cuda_PBO = cuda_gl.RegisteredBuffer(long(gl_PBO))
-  print "Buffer Created" 
+  #print "Buffer Created" 
   #Create texture which we use to display the result and bind to gl_tex
   #glEnable(GL_TEXTURE_2D)
   gl_tex = glGenTextures(1)
@@ -201,18 +200,17 @@ def initPixelBuffer():
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
   glBindTexture(GL_TEXTURE_2D, 0)
-  print "Texture Created"
+  #print "Texture Created"
 
 def initCUDA():
-  global volumeSize
   global plotData_h
-  global plotDataArray_d
+  global plotData_dArray
   global tex, transferTex
   global transferFuncArray_d
   global testData_d
   global c_invViewMatrix
   global renderKernel
-  print "Compiling CUDA code"
+  #print "Compiling CUDA code for volumeRender"
   cudaCodeFile = open(volRenderDirectory + "/CUDAvolumeRender.cu","r")
   cudaCodeString = cudaCodeFile.read() 
   cudaCodeStringComplete = cudaCodeString
@@ -222,12 +220,12 @@ def initCUDA():
   c_invViewMatrix = cudaCode.get_global('c_invViewMatrix')[0]
   renderKernel = cudaCode.get_function("d_render")
 
-  plotDataArray_d = np3DtoCudaArray( plotData_h )
+  if not plotData_dArray: plotData_dArray = np3DtoCudaArray( plotData_h )
   tex.set_flags(cuda.TRSF_NORMALIZED_COORDINATES)
   tex.set_filter_mode(cuda.filter_mode.LINEAR)
   tex.set_address_mode(0, cuda.address_mode.CLAMP)
   tex.set_address_mode(1, cuda.address_mode.CLAMP)
-  tex.set_array(plotDataArray_d)
+  tex.set_array(plotData_dArray)
   
   transferFunc = np.array([
     [  0.0, 0.0, 0.0, 0.0, ],
@@ -245,7 +243,7 @@ def initCUDA():
   transferTex.set_address_mode(0, cuda.address_mode.CLAMP)
   transferTex.set_address_mode(1, cuda.address_mode.CLAMP)
   transferTex.set_array(transferFuncArray_d)  
-  print "CUDA initialized"
+  print "CUDA volumeRender initialized"
 
   
 def keyboard(*args):
@@ -326,14 +324,14 @@ def startGL():
   glutMouseFunc(mouse)
   glutMotionFunc(motion)
   glutReshapeFunc(reshape)
-  glutIdleFunc(glutPostRedisplay())
+  glutIdleFunc(glutPostRedisplay)
   glutMainLoop()
 
 #OpenGL main
 def animate():
   print "Starting Volume Render"
-  initGL()
-  import pycuda.gl.autoinit
+  #initGL()
+  #import pycuda.gl.autoinit
   initCUDA()
   initPixelBuffer()
   startGL()

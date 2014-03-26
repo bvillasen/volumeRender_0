@@ -11,7 +11,7 @@ import pycuda.gl as cuda_gl
 from pycuda.compiler import SourceModule
 from pycuda import cumath
 import pycuda.gpuarray as gpuarray
-import pyglew as glew
+#import pyglew as glew
 
 #Add Modules from other directories
 currentDirectory = os.getcwd()
@@ -24,9 +24,18 @@ from cudaTools import np3DtoCudaArray, np2DtoCudaArray
 nWidth = 128
 nHeight = 128
 nDepth = 128
-nData = nWidth*nHeight*nDepth
+#nData = nWidth*nHeight*nDepth
 
-plotData_h = np.random.rand(nData)
+windowTitle = "CUDA 3D volume render"
+
+
+viewXmin, viewXmax = -0.5, 0.5
+viewYmin, viewYmax = -0.5, 0.5
+viewZmin, viewZmax = -0.5, 0.5
+
+
+
+plotData_h = np.random.rand(nWidth*nHeight*nDepth)
 
 def stepFunc():
   print "Default step function"
@@ -86,7 +95,7 @@ def computeFPS():
     fpsCount += 1
     if fpsCount == fpsLimit:
         ifps = 1.0 /timer
-        glutSetWindowTitle("Volume Render: %f fps" % ifps)
+        glutSetWindowTitle(windowTitle + "      fps={0:0.2f}".format( float(ifps) ))
         fpsCount = 0
 
 def render():
@@ -109,10 +118,11 @@ def display():
   global gl_tex, gl_PBO
   global timer
   
+  timer = time.time()
   stepFunc()
   
+
   
-  timer = time.time()
   modelView = np.ones(16)
   glMatrixMode(GL_MODELVIEW)
   glPushMatrix()
@@ -123,6 +133,7 @@ def display():
   modelView = glGetFloatv(GL_MODELVIEW_MATRIX )
   modelView = modelView.reshape(16).astype(np.float32)
   glPopMatrix()
+  #invViewMatrix_h = modelView[:12]
   invViewMatrix_h[0] = modelView[0]
   invViewMatrix_h[1] = modelView[4]
   invViewMatrix_h[2] = modelView[8]
@@ -138,29 +149,37 @@ def display():
   render()
    # display results
   glClear(GL_COLOR_BUFFER_BIT)
-   # draw image from PBO
+  
+ 
+  
+  
+  # draw image from PBO
   glDisable(GL_DEPTH_TEST)
   glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
    # draw using texture
    # copy from pbo to texture
-  glBindBufferARB( glew.GL_PIXEL_UNPACK_BUFFER_ARB, gl_PBO)
+  glBindBufferARB( GL_PIXEL_UNPACK_BUFFER, gl_PBO)
   glBindTexture(GL_TEXTURE_2D, gl_tex)
   glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width_GL, height_GL, GL_RGBA, GL_UNSIGNED_BYTE, None)
-  glBindBufferARB(glew.GL_PIXEL_UNPACK_BUFFER_ARB, 0)
+  glBindBufferARB(GL_PIXEL_UNPACK_BUFFER, 0)
    # draw textured quad
   glEnable(GL_TEXTURE_2D)
   glBegin(GL_QUADS)
   glTexCoord2f(0, 0)
-  glVertex2f(0, 0)
+  glVertex2f(-0.5, -0.5)
   glTexCoord2f(1, 0)
-  glVertex2f(1, 0)
+  glVertex2f(0.5, -0.5)
   glTexCoord2f(1, 1)
-  glVertex2f(1, 1)
+  glVertex2f(0.5, 0.5)
   glTexCoord2f(0, 1)
-  glVertex2f(0, 1)
+  glVertex2f(-0.5, 0.5)
   glEnd()
+
   glDisable(GL_TEXTURE_2D)
   glBindTexture(GL_TEXTURE_2D, 0)
+  
+
+
   glutSwapBuffers();
   timer = time.time() - timer
   computeFPS()
@@ -174,21 +193,25 @@ def iDivUp( a, b ):
     
 
 
-def initGL():	
+GL_initialized = False
+def initGL():
+  global GL_initialized
+  if GL_initialized: return
   glutInit()
   glutInitDisplayMode(GLUT_RGB |GLUT_DOUBLE )
   glutInitWindowSize(width_GL, height_GL)
   #glutInitWindowPosition(50, 50)
-  glutCreateWindow("Volume Render")
-  glew.glewInit()
+  glutCreateWindow( windowTitle )
+  #glew.glewInit()
+  GL_initialized = True
   print "OpenGL initialized"
   
 def initPixelBuffer():
   global gl_PBO, cuda_PBO, gl_tex   
   gl_PBO = glGenBuffers(1)
-  glBindBufferARB(glew.GL_PIXEL_UNPACK_BUFFER_ARB, gl_PBO)
-  glBufferDataARB(glew.GL_PIXEL_UNPACK_BUFFER_ARB, width_GL*height_GL*4, None, GL_STREAM_DRAW_ARB)
-  glBindBufferARB(glew.GL_PIXEL_UNPACK_BUFFER_ARB, 0)
+  glBindBufferARB(GL_PIXEL_UNPACK_BUFFER, gl_PBO)
+  glBufferDataARB(GL_PIXEL_UNPACK_BUFFER, width_GL*height_GL*4, None, GL_STREAM_DRAW_ARB)
+  glBindBufferARB(GL_PIXEL_UNPACK_BUFFER, 0)
   cuda_PBO = cuda_gl.RegisteredBuffer(long(gl_PBO))
   #print "Buffer Created" 
   #Create texture which we use to display the result and bind to gl_tex
@@ -247,33 +270,46 @@ def initCUDA():
 
   
 def keyboard(*args):
-  global transferScale, brightness, density
+  global transferScale, brightness, density, transferOffset
   ESCAPE = '\033'
   # If escape is pressed, kill everything.
   if args[0] == ESCAPE:
     print "Ending Simulation"
     #cuda.gl.Context.pop()
     sys.exit()
-  if args[0] == '6':
+  if args[0] == '1':
     transferScale += np.float32(0.01)
     print "Image Transfer Scale: ",transferScale
-  if args[0] == '3':
+  if args[0] == '2':
     transferScale -= np.float32(0.01)
     print "Image Transfer Scale: ",transferScale
+  if args[0] == '4':
+    brightness -= np.float32(0.1)
+    print "Image Brightness : ",brightness
   if args[0] == '5':
     brightness += np.float32(0.1)
     print "Image Brightness : ",brightness
-  if args[0] == '2':
-    brightness -= np.float32(0.1)
-    print "Image Brightness : ",brightness
-  if args[0] == '4':
-    density += np.float32(0.01)
-    print "Image Density : ",density    
-  if args[0] == '1':
+  if args[0] == '7':
     density -= np.float32(0.01)
     print "Image Density : ",density    
+  if args[0] == '8':
+    density += np.float32(0.01)
+    print "Image Density : ",density    
+  if args[0] == '3':
+    transferOffset += np.float32(0.01)
+    print "Image Offset : ", transferOffset    
+  if args[0] == '6':
+    transferOffset -= np.float32(0.01)
+    print "Image Offset : ", transferOffset   
 
 
+def specialKeys( key, x, y ):
+  if key==GLUT_KEY_UP:
+    print "UP-arrow pressed"
+  if key==GLUT_KEY_DOWN:
+    print "DOWN-arrow pressed"
+    
+    
 ox = 0
 oy = 0
 buttonState = 0
@@ -308,19 +344,27 @@ def reshape(w, h):
   global width_GL, height_GL
   global grid2D_GL, block2D_GL
   initPixelBuffer()
+  #width_GL, height_GL = w, h
   grid2D_GL = ( iDivUp(width_GL, block2D_GL[0]), iDivUp(height_GL, block2D_GL[1]) )
   glViewport(0, 0, w, h)
-  glMatrixMode(GL_MODELVIEW)
-  glLoadIdentity()
+
   glMatrixMode(GL_PROJECTION)
   glLoadIdentity()
-  glOrtho(0.0, 1.0, 0.0, 1.0, 0.0, 1.0)
-  
+  #glOrtho(0.0, 1.0, 0.0, 1.0, 0.0, 1.0)
+  if w <= h: glOrtho( viewXmin, viewXmax, 
+				viewYmin*h/w, viewYmax*h/w,
+				viewZmin, viewZmax)
+  else: glOrtho(viewXmin*w/h, viewXmax*w/h, 
+		viewYmin, viewYmax,
+		viewZmin, viewZmax)
+  glMatrixMode(GL_MODELVIEW)
+  glLoadIdentity()
   
   
 def startGL():
   glutDisplayFunc(display)
   glutKeyboardFunc(keyboard)
+  glutSpecialFunc(specialKeys)
   glutMouseFunc(mouse)
   glutMotionFunc(motion)
   glutReshapeFunc(reshape)
@@ -329,6 +373,7 @@ def startGL():
 
 #OpenGL main
 def animate():
+  global windowTitle
   print "Starting Volume Render"
   #initGL()
   #import pycuda.gl.autoinit

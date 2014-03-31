@@ -40,10 +40,8 @@ plotData_h = np.random.rand(nWidth*nHeight*nDepth)
 def stepFunc():
   print "Default step function"
 
-#globals()["stepFunc"] = stepFunction
-
-width_GL = 512
-height_GL = 512
+width_GL = 512*2
+height_GL = 512*2
 
 dataMax = plotData_h.max()
 plotData_h = (256.*plotData_h/dataMax).astype(np.uint8).reshape(nDepth, nHeight, nWidth)
@@ -315,8 +313,13 @@ oy = 0
 buttonState = 0
 def mouse(button, state, x , y):
   global ox, oy, buttonState
+
   if state == GLUT_DOWN:
     buttonState |= 1<<button
+    if button == 3:  #wheel up
+      viewTranslation[2] += 0.5
+    if button == 4:  #wheel down
+      viewTranslation[2] -= 0.5
   elif state == GLUT_UP:
     buttonState = 0
   ox = x
@@ -329,7 +332,8 @@ def motion(x, y):
   dx = x - ox
   dy = y - oy 
   if buttonState == 4:
-    viewTranslation[2] += dy/100.
+    viewTranslation[0] += dx/100.
+    viewTranslation[1] -= dy/100.
   elif buttonState == 2:
     viewTranslation[0] += dx/100.
     viewTranslation[1] -= dy/100.

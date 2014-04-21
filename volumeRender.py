@@ -46,6 +46,7 @@ height_GL = 512*2
 dataMax = plotData_h.max()
 plotData_h = (256.*plotData_h/dataMax).astype(np.uint8).reshape(nDepth, nHeight, nWidth)
 plotData_dArray = None
+plotData_dArray_1 = None
 transferFuncArray_d = None
 
 viewRotation =  np.zeros(3).astype(np.float32)
@@ -66,9 +67,11 @@ transferScale = np.float32(transferScale)
 block2D_GL = (16, 16, 1)
 grid2D_GL = (width_GL/block2D_GL[0], height_GL /block2D_GL[1] ) 
 
-gl_tex = None
-gl_PBO = None
-cuda_PBO = None
+gl_tex = []
+nTextures = 1
+gl_PBO = []
+#nPBOs = 1
+cuda_PBO = []
 
 
 frameCount = 0
@@ -104,22 +107,22 @@ def render():
   global tex, transferTex
   global testData_d
   cuda.memcpy_htod( c_invViewMatrix,  invViewMatrix_h)
-  # map PBO to get CUDA device pointer
-  cuda_PBO_map = cuda_PBO.map()
-  cuda_PBO_ptr, cuda_PBO_size = cuda_PBO_map.device_ptr_and_size()
-  cuda.memset_d32( cuda_PBO_ptr, 0, width_GL*height_GL )
-  renderKernel( np.intp(cuda_PBO_ptr), np.int32(width_GL), np.int32(height_GL), density, brightness, transferOffset, transferScale, grid=grid2D_GL, block = block2D_GL, texrefs=[tex, transferTex] )
-  cuda_PBO_map.unmap()
+  for i in range(nTextures):
+    if i == 0: tex.set_array(plotData_dArray)
+    if i == 1: tex.set_array(plotData_dArray_1)
+    # map PBO to get CUDA device pointer
+    cuda_PBO_map = cuda_PBO[i].map()
+    cuda_PBO_ptr, cuda_PBO_size = cuda_PBO_map.device_ptr_and_size()
+    cuda.memset_d32( cuda_PBO_ptr, 0, width_GL*height_GL )
+    renderKernel( np.intp(cuda_PBO_ptr), np.int32(width_GL), np.int32(height_GL), density, brightness, transferOffset, transferScale, grid=grid2D_GL, block = block2D_GL, texrefs=[tex, transferTex] )
+    cuda_PBO_map.unmap()
   
 def display():
   global viewRotation, viewTranslation, invViewMatrix_h
-  global gl_tex, gl_PBO
   global timer
   
   timer = time.time()
   stepFunc()
-  
-
   
   modelView = np.ones(16)
   glMatrixMode(GL_MODELVIEW)
@@ -147,37 +150,46 @@ def display():
   render()
    # display results
   glClear(GL_COLOR_BUFFER_BIT)
-  
  
+  for i in range(nTextures):
   
-  
-  # draw image from PBO
-  glDisable(GL_DEPTH_TEST)
-  glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
-   # draw using texture
-   # copy from pbo to texture
-  glBindBufferARB( GL_PIXEL_UNPACK_BUFFER, gl_PBO)
-  glBindTexture(GL_TEXTURE_2D, gl_tex)
-  glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width_GL, height_GL, GL_RGBA, GL_UNSIGNED_BYTE, None)
-  glBindBufferARB(GL_PIXEL_UNPACK_BUFFER, 0)
-   # draw textured quad
-  glEnable(GL_TEXTURE_2D)
-  glBegin(GL_QUADS)
-  glTexCoord2f(0, 0)
-  glVertex2f(-0.5, -0.5)
-  glTexCoord2f(1, 0)
-  glVertex2f(0.5, -0.5)
-  glTexCoord2f(1, 1)
-  glVertex2f(0.5, 0.5)
-  glTexCoord2f(0, 1)
-  glVertex2f(-0.5, 0.5)
-  glEnd()
+    # draw image from PBO
+    #glDisable(GL_DEPTH_TEST)
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
+    # draw using texture
+    # copy from pbo to texture
+    glBindBufferARB( GL_PIXEL_UNPACK_BUFFER, gl_PBO[i])
+    glBindTexture(GL_TEXTURE_2D, gl_tex[i])
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width_GL, height_GL, GL_RGBA, GL_UNSIGNED_BYTE, None)
+    glBindBufferARB(GL_PIXEL_UNPACK_BUFFER, 0)
+    # draw textured quad
+    #glEnable(GL_TEXTURE_2D)
+    glBegin(GL_QUADS)
+    glTexCoord2f(0, 0)
+    if nTextures == 2: 
+      if i==0: glVertex2f(-1., -0.5)
+      if i==1: glVertex2f( 0., -0.5)
+    else:  glVertex2f(-0.5, -0.5)
+    glTexCoord2f(1, 0)
+    if nTextures == 2:
+      if i==0: glVertex2f( 0., -0.5)
+      if i==1: glVertex2f( 1., -0.5)
+    else: glVertex2f(0.5, -0.5)
+    glTexCoord2f(1, 1)
+    if nTextures == 2:
+      if i==0: glVertex2f( 0., 0.5)
+      if i==1: glVertex2f( 1., 0.5)
+    else: glVertex2f(0.5, 0.5)
+    glTexCoord2f(0, 1)
+    if nTextures == 2: 
+      if i==0: glVertex2f(-1., 0.5)
+      if i==1: glVertex2f( 0., 0.5)
+    else: glVertex2f(-0.5, 0.5)
+    glEnd()
 
-  glDisable(GL_TEXTURE_2D)
-  glBindTexture(GL_TEXTURE_2D, 0)
-  
-
-
+    #glDisable(GL_TEXTURE_2D)
+    glBindTexture(GL_TEXTURE_2D, 0)
+    
   glutSwapBuffers();
   timer = time.time() - timer
   computeFPS()
@@ -197,7 +209,7 @@ def initGL():
   if GL_initialized: return
   glutInit()
   glutInitDisplayMode(GLUT_RGB |GLUT_DOUBLE )
-  glutInitWindowSize(width_GL, height_GL)
+  glutInitWindowSize(width_GL*nTextures, height_GL)
   #glutInitWindowPosition(50, 50)
   glutCreateWindow( windowTitle )
   #glew.glewInit()
@@ -205,37 +217,40 @@ def initGL():
   print "OpenGL initialized"
   
 def initPixelBuffer():
-  global gl_PBO, cuda_PBO, gl_tex   
-  gl_PBO = glGenBuffers(1)
-  glBindBufferARB(GL_PIXEL_UNPACK_BUFFER, gl_PBO)
-  glBufferDataARB(GL_PIXEL_UNPACK_BUFFER, width_GL*height_GL*4, None, GL_STREAM_DRAW_ARB)
-  glBindBufferARB(GL_PIXEL_UNPACK_BUFFER, 0)
-  cuda_PBO = cuda_gl.RegisteredBuffer(long(gl_PBO))
+  global cuda_PBO    
+  for i in range(nTextures):
+    PBO = glGenBuffers(1)
+    gl_PBO.append(PBO)
+    glBindBufferARB(GL_PIXEL_UNPACK_BUFFER, gl_PBO[i])
+    glBufferDataARB(GL_PIXEL_UNPACK_BUFFER, width_GL*height_GL*4, None, GL_STREAM_DRAW_ARB)
+    glBindBufferARB(GL_PIXEL_UNPACK_BUFFER, 0)
+    cuda_PBO.append( cuda_gl.RegisteredBuffer(long(gl_PBO[i])) )
   #print "Buffer Created" 
   #Create texture which we use to display the result and bind to gl_tex
-  #glEnable(GL_TEXTURE_2D)
-  gl_tex = glGenTextures(1)
-  glBindTexture(GL_TEXTURE_2D, gl_tex)
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width_GL, height_GL, 0, 
-		GL_RGBA, GL_UNSIGNED_BYTE, None);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
-  glBindTexture(GL_TEXTURE_2D, 0)
+  glEnable(GL_TEXTURE_2D)
+  
+  for i in range(nTextures):
+    tex = glGenTextures(1)
+    gl_tex.append( tex )
+    glBindTexture(GL_TEXTURE_2D, gl_tex[i])
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width_GL, height_GL, 0, 
+		  GL_RGBA, GL_UNSIGNED_BYTE, None);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+    glBindTexture(GL_TEXTURE_2D, 0)
   #print "Texture Created"
 
 def initCUDA():
-  global plotData_h
   global plotData_dArray
   global tex, transferTex
   global transferFuncArray_d
-  global testData_d
   global c_invViewMatrix
   global renderKernel
   #print "Compiling CUDA code for volumeRender"
   cudaCodeFile = open(volRenderDirectory + "/CUDAvolumeRender.cu","r")
   cudaCodeString = cudaCodeFile.read() 
   cudaCodeStringComplete = cudaCodeString
-  cudaCode = SourceModule(cudaCodeStringComplete, no_extern_c=True)
+  cudaCode = SourceModule(cudaCodeStringComplete, no_extern_c=True, include_dirs=[currentDirectory] )
   tex = cudaCode.get_texref("tex")
   transferTex = cudaCode.get_texref("transferTex")
   c_invViewMatrix = cudaCode.get_global('c_invViewMatrix')[0]
@@ -264,7 +279,7 @@ def initCUDA():
   transferTex.set_address_mode(0, cuda.address_mode.CLAMP)
   transferTex.set_address_mode(1, cuda.address_mode.CLAMP)
   transferTex.set_array(transferFuncArray_d)  
-  print "CUDA volumeRender initialized"
+  print "CUDA volumeRender initialized\n"
 
   
 def keyboard(*args):

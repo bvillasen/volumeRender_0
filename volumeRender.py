@@ -52,6 +52,7 @@ transferFuncArray_d = None
 viewRotation =  np.zeros(3).astype(np.float32)
 viewTranslation = np.array([0., 0., -4.])
 invViewMatrix_h = np.arange(12).astype(np.float32)
+scaleX = 1.
 
 
 density = 0.05
@@ -135,7 +136,7 @@ def display():
   modelView = modelView.reshape(16).astype(np.float32)
   glPopMatrix()
   #invViewMatrix_h = modelView[:12]
-  invViewMatrix_h[0] = modelView[0]
+  invViewMatrix_h[0] = modelView[0]/scaleX
   invViewMatrix_h[1] = modelView[4]
   invViewMatrix_h[2] = modelView[8]
   invViewMatrix_h[3] = modelView[12]

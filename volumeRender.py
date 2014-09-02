@@ -251,7 +251,7 @@ def initCUDA():
   cudaCodeFile = open(volRenderDirectory + "/CUDAvolumeRender.cu","r")
   cudaCodeString = cudaCodeFile.read() 
   cudaCodeStringComplete = cudaCodeString
-  cudaCode = SourceModule(cudaCodeStringComplete, no_extern_c=True, include_dirs=[currentDirectory] )
+  cudaCode = SourceModule(cudaCodeStringComplete, no_extern_c=True, include_dirs=[volRenderDirectory] )
   tex = cudaCode.get_texref("tex")
   transferTex = cudaCode.get_texref("transferTex")
   c_invViewMatrix = cudaCode.get_global('c_invViewMatrix')[0]

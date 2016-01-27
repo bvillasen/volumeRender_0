@@ -4,7 +4,7 @@ from OpenGL.GL import *
 from OpenGL.GLUT import *
 from OpenGL.GLU import *
 from OpenGL.GL.ARB.vertex_buffer_object import *
-import numpy as np, Image
+import numpy as np
 import sys, time, os
 import pycuda.driver as cuda
 import pycuda.gl as cuda_gl
@@ -16,7 +16,7 @@ import pycuda.gpuarray as gpuarray
 #Add Modules from other directories
 currentDirectory = os.getcwd()
 parentDirectory = currentDirectory[:currentDirectory.rfind("/")]
-myToolsDirectory = parentDirectory + "/myTools"
+myToolsDirectory = parentDirectory + "/tools"
 volRenderDirectory = parentDirectory + "/volumeRender"
 sys.path.extend( [myToolsDirectory, volRenderDirectory] )
 from cudaTools import np3DtoCudaArray, np2DtoCudaArray
@@ -109,8 +109,12 @@ def render():
   global testData_d
   cuda.memcpy_htod( c_invViewMatrix,  invViewMatrix_h)
   for i in range(nTextures):
-    if i == 0: tex.set_array(plotData_dArray)
-    if i == 1: tex.set_array(plotData_dArray_1)
+    if i == 0: 
+      brightness = np.float32(1.0)
+      tex.set_array(plotData_dArray)
+    if i == 1: 
+      brightness = np.float32(2)
+      tex.set_array(plotData_dArray_1)
     # map PBO to get CUDA device pointer
     cuda_PBO_map = cuda_PBO[i].map()
     cuda_PBO_ptr, cuda_PBO_size = cuda_PBO_map.device_ptr_and_size()

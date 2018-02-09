@@ -11,13 +11,16 @@ import pycuda.gl as cuda_gl
 from pycuda.compiler import SourceModule
 from pycuda import cumath
 import pycuda.gpuarray as gpuarray
+import matplotlib.colors as cl
+import matplotlib.cm as cm
 #import pyglew as glew
 
 #Add Modules from other directories
 currentDirectory = os.getcwd()
 parentDirectory = currentDirectory[:currentDirectory.rfind("/")]
-myToolsDirectory = parentDirectory + "/tools"
-volRenderDirectory = parentDirectory + "/volumeRender"
+devDir = '/home/bruno/Desktop/Dropbox/Developer/pyCUDA/'
+myToolsDirectory = devDir + "tools"
+volRenderDirectory = devDir + "volumeRender"
 sys.path.extend( [myToolsDirectory, volRenderDirectory] )
 from cudaTools import np3DtoCudaArray, np2DtoCudaArray
 
@@ -56,17 +59,24 @@ scaleX = 1.
 
 
 density = 0.05
-brightness = 1.0
+brightness = 2.0
 transferOffset = 0.0
 transferScale = 1.0
+
+
 #linearFiltering = True
+def sigmoid( x, center, ramp ):
+  return 1./( 1 + np.exp(-ramp*(x-center)))
+
+
+
 density = np.float32(density)
 brightness = np.float32(brightness)
 transferOffset = np.float32(transferOffset)
 transferScale = np.float32(transferScale)
 
 block2D_GL = (16, 16, 1)
-grid2D_GL = (width_GL/block2D_GL[0], height_GL /block2D_GL[1] ) 
+grid2D_GL = (width_GL/block2D_GL[0], height_GL /block2D_GL[1] )
 
 gl_tex = []
 nTextures = 1
@@ -90,16 +100,20 @@ renderKernel = None
 #CUDA Textures
 tex = None
 transferTex = None
-
+fpsCount_1 = 0
 def computeFPS():
-    global frameCount, fpsCount, fpsLimit, timer
+    global frameCount, fpsCount, fpsLimit, timer, fpsCount_1
     frameCount += 1
     fpsCount += 1
+    fpsCount_1 += 1
+
     if fpsCount == fpsLimit:
         ifps = 1.0 /timer
         glutSetWindowTitle(windowTitle + "      fps={0:0.2f}".format( float(ifps) ))
         fpsCount = 0
-
+    # if fpsCount_1 == 2:
+    #     viewRotation[1] += np.float32(1)
+    #     fpsCount_1 = 0
 def render():
   global invViewMatrix_h, c_invViewMatrix
   global gl_PBO, cuda_PBO
@@ -109,11 +123,11 @@ def render():
   global testData_d
   cuda.memcpy_htod( c_invViewMatrix,  invViewMatrix_h)
   for i in range(nTextures):
-    if i == 0: 
-      brightness = np.float32(1.0)
+    if i == 0:
+      # brightness = np.float32(1.0)
       tex.set_array(plotData_dArray)
-    if i == 1: 
-      brightness = np.float32(2)
+    if i == 1:
+      # brightness = np.float32(2)
       tex.set_array(plotData_dArray_1)
     # map PBO to get CUDA device pointer
     cuda_PBO_map = cuda_PBO[i].map()
@@ -121,14 +135,14 @@ def render():
     cuda.memset_d32( cuda_PBO_ptr, 0, width_GL*height_GL )
     renderKernel( np.intp(cuda_PBO_ptr), np.int32(width_GL), np.int32(height_GL), density, brightness, transferOffset, transferScale, grid=grid2D_GL, block = block2D_GL, texrefs=[tex, transferTex] )
     cuda_PBO_map.unmap()
-  
+
 def display():
   global viewRotation, viewTranslation, invViewMatrix_h
   global timer
-  
+
   timer = time.time()
   stepFunc()
-  
+  time.sleep(0.07)
   modelView = np.ones(16)
   glMatrixMode(GL_MODELVIEW)
   glPushMatrix()
@@ -155,9 +169,9 @@ def display():
   render()
    # display results
   glClear(GL_COLOR_BUFFER_BIT)
- 
+
   for i in range(nTextures):
-  
+
     # draw image from PBO
     #glDisable(GL_DEPTH_TEST)
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
@@ -171,7 +185,7 @@ def display():
     #glEnable(GL_TEXTURE_2D)
     glBegin(GL_QUADS)
     glTexCoord2f(0, 0)
-    if nTextures == 2: 
+    if nTextures == 2:
       if i==0: glVertex2f(-1., -0.5)
       if i==1: glVertex2f( 0., -0.5)
     else:  glVertex2f(-0.5, -0.5)
@@ -186,7 +200,7 @@ def display():
       if i==1: glVertex2f( 1., 0.5)
     else: glVertex2f(0.5, 0.5)
     glTexCoord2f(0, 1)
-    if nTextures == 2: 
+    if nTextures == 2:
       if i==0: glVertex2f(-1., 0.5)
       if i==1: glVertex2f( 0., 0.5)
     else: glVertex2f(-0.5, 0.5)
@@ -194,7 +208,7 @@ def display():
 
     #glDisable(GL_TEXTURE_2D)
     glBindTexture(GL_TEXTURE_2D, 0)
-    
+
   glutSwapBuffers();
   timer = time.time() - timer
   computeFPS()
@@ -205,7 +219,7 @@ def iDivUp( a, b ):
     return a/b + 1
   else:
     return a/b
-    
+
 
 
 GL_initialized = False
@@ -220,9 +234,9 @@ def initGL():
   #glew.glewInit()
   GL_initialized = True
   print "OpenGL initialized"
-  
+
 def initPixelBuffer():
-  global cuda_PBO    
+  global cuda_PBO
   for i in range(nTextures):
     PBO = glGenBuffers(1)
     gl_PBO.append(PBO)
@@ -230,20 +244,65 @@ def initPixelBuffer():
     glBufferDataARB(GL_PIXEL_UNPACK_BUFFER, width_GL*height_GL*4, None, GL_STREAM_DRAW_ARB)
     glBindBufferARB(GL_PIXEL_UNPACK_BUFFER, 0)
     cuda_PBO.append( cuda_gl.RegisteredBuffer(long(gl_PBO[i])) )
-  #print "Buffer Created" 
+  #print "Buffer Created"
   #Create texture which we use to display the result and bind to gl_tex
   glEnable(GL_TEXTURE_2D)
-  
+
   for i in range(nTextures):
     tex = glGenTextures(1)
     gl_tex.append( tex )
     glBindTexture(GL_TEXTURE_2D, gl_tex[i])
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width_GL, height_GL, 0, 
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width_GL, height_GL, 0,
 		  GL_RGBA, GL_UNSIGNED_BYTE, None);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
     glBindTexture(GL_TEXTURE_2D, 0)
   #print "Texture Created"
+
+
+colorMap = 'nipy_spectral'
+
+
+colorMaps = ['nipy_spectral', 'viridis',  'inferno', 'bone', 'hot', 'CMRmap', 'copper']
+cmap_indx = 0
+
+transp_center = 0
+transp_ramp = 1
+
+
+def set_transfer_function( ):
+  global transp_ramp, transp_center
+  colorMap = colorMaps[cmap_indx]
+  norm = cl.Normalize(vmin=0, vmax=1, clip=False)
+  cmap = cm.ScalarMappable( norm=norm, cmap=colorMap)
+  colorVals = np.linspace(1,0,256)
+  colorData = cmap.to_rgba(colorVals).astype(np.float32)
+  transp_vals = np.linspace(1,-1,256)
+  transparency = sigmoid( transp_vals, transp_center, transp_ramp )
+  colorData[:,3] = (colorVals**transp_ramp).astype(np.float32)
+  print colorMap, transp_ramp, transp_center
+
+
+  transferFunc = np.array([
+    [  1.0, 0.0, 0.0, 1.0, ],
+    [  1.0, 0.0, 0.0, 1.0, ],
+    [  1.0, 0.5, 0.0, 1.0, ],
+    [  1.0, 1.0, 0.0, 1.0, ],
+    [  0.0, 1.0, 0.0, 1.0, ],
+    [  0.0, 1.0, 1.0, 1.0, ],
+    [  0.0, 0.0, 1.0, 1.0, ],
+    [  0.4, 0.0, 1.0, 1.0, ],
+    [  0.0, 0.0, 0.0, 0.0, ]]).astype(np.float32)
+  transferFunc = colorData.copy()
+  transferFuncArray_d, desc = np2DtoCudaArray( transferFunc )
+  transferTex.set_flags(cuda.TRSF_NORMALIZED_COORDINATES)
+  transferTex.set_filter_mode(cuda.filter_mode.LINEAR)
+  transferTex.set_address_mode(0, cuda.address_mode.CLAMP)
+  transferTex.set_address_mode(1, cuda.address_mode.CLAMP)
+  transferTex.set_array(transferFuncArray_d)
+
+
+
 
 def initCUDA():
   global plotData_dArray
@@ -253,7 +312,7 @@ def initCUDA():
   global renderKernel
   #print "Compiling CUDA code for volumeRender"
   cudaCodeFile = open(volRenderDirectory + "/CUDAvolumeRender.cu","r")
-  cudaCodeString = cudaCodeFile.read() 
+  cudaCodeString = cudaCodeFile.read()
   cudaCodeStringComplete = cudaCodeString
   cudaCode = SourceModule(cudaCodeStringComplete, no_extern_c=True, include_dirs=[volRenderDirectory] )
   tex = cudaCode.get_texref("tex")
@@ -267,26 +326,11 @@ def initCUDA():
   tex.set_address_mode(0, cuda.address_mode.CLAMP)
   tex.set_address_mode(1, cuda.address_mode.CLAMP)
   tex.set_array(plotData_dArray)
-  
-  transferFunc = np.array([
-    [  0.0, 0.0, 0.0, 0.0, ],
-    [  1.0, 0.0, 0.0, 1.0, ],
-    [  1.0, 0.5, 0.0, 1.0, ],
-    [  1.0, 1.0, 0.0, 1.0, ],
-    [  0.0, 1.0, 0.0, 1.0, ],
-    [  0.0, 1.0, 1.0, 1.0, ],
-    [  0.0, 0.0, 1.0, 1.0, ],
-    [  1.0, 0.0, 1.0, 1.0, ],
-    [  0.0, 0.0, 0.0, 0.0, ]]).astype(np.float32)
-  transferFuncArray_d, desc = np2DtoCudaArray( transferFunc )
-  transferTex.set_flags(cuda.TRSF_NORMALIZED_COORDINATES)
-  transferTex.set_filter_mode(cuda.filter_mode.LINEAR)
-  transferTex.set_address_mode(0, cuda.address_mode.CLAMP)
-  transferTex.set_address_mode(1, cuda.address_mode.CLAMP)
-  transferTex.set_array(transferFuncArray_d)  
+
+  set_transfer_function(  )
   print "CUDA volumeRender initialized\n"
 
-  
+
 def keyboard(*args):
   global transferScale, brightness, density, transferOffset
   ESCAPE = '\033'
@@ -302,23 +346,23 @@ def keyboard(*args):
     transferScale -= np.float32(0.01)
     print "Image Transfer Scale: ",transferScale
   if args[0] == '4':
-    brightness -= np.float32(0.1)
+    brightness -= np.float32(0.01)
     print "Image Brightness : ",brightness
   if args[0] == '5':
-    brightness += np.float32(0.1)
+    brightness += np.float32(0.01)
     print "Image Brightness : ",brightness
   if args[0] == '7':
     density -= np.float32(0.01)
-    print "Image Density : ",density    
+    print "Image Density : ",density
   if args[0] == '8':
     density += np.float32(0.01)
-    print "Image Density : ",density    
+    print "Image Density : ",density
   if args[0] == '3':
     transferOffset += np.float32(0.01)
-    print "Image Offset : ", transferOffset    
+    print "Image Offset : ", transferOffset
   if args[0] == '6':
     transferOffset -= np.float32(0.01)
-    print "Image Offset : ", transferOffset   
+    print "Image Offset : ", transferOffset
 
 
 def specialKeys( key, x, y ):
@@ -326,8 +370,8 @@ def specialKeys( key, x, y ):
     print "UP-arrow pressed"
   if key==GLUT_KEY_DOWN:
     print "DOWN-arrow pressed"
-    
-    
+
+
 ox = 0
 oy = 0
 buttonState = 0
@@ -350,7 +394,7 @@ def motion(x, y):
   global viewRotation, viewTranslation
   global ox, oy, buttonState
   dx = x - ox
-  dy = y - oy 
+  dy = y - oy
   if buttonState == 4:
     viewTranslation[0] += dx/100.
     viewTranslation[1] -= dy/100.
@@ -375,16 +419,16 @@ def reshape(w, h):
   glMatrixMode(GL_PROJECTION)
   glLoadIdentity()
   #glOrtho(0.0, 1.0, 0.0, 1.0, 0.0, 1.0)
-  if w <= h: glOrtho( viewXmin, viewXmax, 
+  if w <= h: glOrtho( viewXmin, viewXmax,
 				viewYmin*h/w, viewYmax*h/w,
 				viewZmin, viewZmax)
-  else: glOrtho(viewXmin*w/h, viewXmax*w/h, 
+  else: glOrtho(viewXmin*w/h, viewXmax*w/h,
 		viewYmin, viewYmax,
 		viewZmin, viewZmax)
   glMatrixMode(GL_MODELVIEW)
   glLoadIdentity()
-  
-  
+
+
 def startGL():
   glutDisplayFunc(display)
   glutKeyboardFunc(keyboard)
@@ -404,5 +448,3 @@ def animate():
   initCUDA()
   initPixelBuffer()
   startGL()
-
-

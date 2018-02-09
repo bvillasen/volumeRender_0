@@ -138,10 +138,10 @@ extern "C"{
   //         float4 col = tex1D(transferTex, (sample-transferOffset)*transferScale);
 	      float4 col;
 	      float nCol =  (sample-transferOffset)*transferScale;
-	      col.x = tex2D(transferTex, 0.f , nCol); 
-	      col.y = tex2D(transferTex, 0.33f , nCol); 
-	      col.z = tex2D(transferTex, 0.66f , nCol); 
-	      col.w = tex2D(transferTex, 1.f , nCol); 
+	      col.x = tex2D(transferTex, 0.f , nCol);
+	      col.y = tex2D(transferTex, 0.33f , nCol);
+	      col.z = tex2D(transferTex, 0.66f , nCol);
+	      col.w = tex2D(transferTex, 1.f , nCol);
 	  col.w *= density;
 
 	  // "under" operator for back-to-front blending
@@ -170,8 +170,3 @@ extern "C"{
 //       d_output[y*imageW + x] = 100;
   }
 }
-
-
-
-
-

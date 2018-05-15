@@ -15,6 +15,9 @@ import matplotlib.colors as cl
 import matplotlib.cm as cm
 #import pyglew as glew
 
+from PIL import Image
+from PIL import ImageOps
+
 #Add Modules from other directories
 currentDirectory = os.getcwd()
 parentDirectory = currentDirectory[:currentDirectory.rfind("/")]
@@ -34,17 +37,34 @@ windowTitle = "CUDA 3D volume render"
 
 viewXmin, viewXmax = -0.5, 0.5
 viewYmin, viewYmax = -0.5, 0.5
-viewZmin, viewZmax = -0.5, 0.5
+viewZmin, viewZmax = -10.5, 10.5
 
 
 
 plotData_h = np.random.rand(nWidth*nHeight*nDepth)
+
+
 
 def stepFunc():
   print "Default step function"
 
 width_GL = 512*2
 height_GL = 512*2
+
+def save_image(image_name='image'):
+  global n_image
+  glPixelStorei(GL_PACK_ALIGNMENT, 1)
+  width = width_GL
+  if nTextures == 2 :width = 2*width_GL
+  data = glReadPixels(0, 0, width, height_GL, GL_RGBA, GL_UNSIGNED_BYTE)
+  image = Image.frombytes("RGBA", (width, height_GL), data)
+  image = ImageOps.flip(image) # in my case image is flipped top-bottom for some reason
+  image_file_name = '{0}_{1}.png'.format(image_name, n_image)
+  image.save(image_file_name, 'PNG')
+  n_image += 1
+  print 'Image saved: {0}'.format(image_file_name)
+
+
 
 dataMax = plotData_h.max()
 plotData_h = (256.*plotData_h/dataMax).astype(np.uint8).reshape(nDepth, nHeight, nWidth)
@@ -53,27 +73,48 @@ plotData_dArray_1 = None
 transferFuncArray_d = None
 
 viewRotation =  np.zeros(3).astype(np.float32)
-viewTranslation = np.array([0., 0., -4.])
+viewTranslation = np.array([0., 0., -3.5])
 invViewMatrix_h = np.arange(12).astype(np.float32)
+invViewMatrix_h_1 = np.arange(12).astype(np.float32)
 scaleX = 1.
-
+separation = 0.
 
 density = 0.05
 brightness = 2.0
 transferOffset = 0.0
 transferScale = 1.0
 
+n_image = 0
 
 #linearFiltering = True
 def sigmoid( x, center, ramp ):
   return 1./( 1 + np.exp(-ramp*(x-center)))
 
+def gaussian( x, center, ramp ):
+  return np.exp(-(x-center)*(x-center)/ramp/ramp)
 
 
+
+transp_type = 'sigmoid'
+colorMap = 'nipy_spectral'
+colorMaps = [ 'CMRmap', 'jet', 'nipy_spectral', 'viridis',  'inferno', 'bone', 'hot', 'copper', 'jet']
+cmap_indx_0 = 0
+trans_center_0 = np.float32(0)
+trans_ramp_0 = np.float32(1)
+
+cmap_indx_1 = 1
+trans_center_1 = np.float32(0)
+trans_ramp_1 = np.float32(1)
+
+
+
+separation = np.float32( separation)
 density = np.float32(density)
 brightness = np.float32(brightness)
 transferOffset = np.float32(transferOffset)
 transferScale = np.float32(transferScale)
+
+
 
 block2D_GL = (16, 16, 1)
 grid2D_GL = (width_GL/block2D_GL[0], height_GL /block2D_GL[1] )
@@ -115,19 +156,22 @@ def computeFPS():
     #     viewRotation[1] += np.float32(1)
     #     fpsCount_1 = 0
 def render():
-  global invViewMatrix_h, c_invViewMatrix
+  global invViewMatrix_h, invViewMatrix_h_1, c_invViewMatrix
   global gl_PBO, cuda_PBO
   global width_GL, height_GL, density, brightness, transferOffset, transferScale
   global block2D_GL, grid2D_GL
   global tex, transferTex
   global testData_d
-  cuda.memcpy_htod( c_invViewMatrix,  invViewMatrix_h)
   for i in range(nTextures):
     if i == 0:
+      set_transfer_function( cmap_indx_0, trans_ramp_0, trans_center_0 )
       # brightness = np.float32(1.0)
+      cuda.memcpy_htod( c_invViewMatrix,  invViewMatrix_h)
       tex.set_array(plotData_dArray)
     if i == 1:
+      set_transfer_function( cmap_indx_1, trans_ramp_1, trans_center_1 )
       # brightness = np.float32(2)
+      cuda.memcpy_htod( c_invViewMatrix,  invViewMatrix_h_1)
       tex.set_array(plotData_dArray_1)
     # map PBO to get CUDA device pointer
     cuda_PBO_map = cuda_PBO[i].map()
@@ -136,36 +180,87 @@ def render():
     renderKernel( np.intp(cuda_PBO_ptr), np.int32(width_GL), np.int32(height_GL), density, brightness, transferOffset, transferScale, grid=grid2D_GL, block = block2D_GL, texrefs=[tex, transferTex] )
     cuda_PBO_map.unmap()
 
-def display():
-  global viewRotation, viewTranslation, invViewMatrix_h
-  global timer
-
-  timer = time.time()
-  stepFunc()
-  time.sleep(0.07)
+def get_model_view_matrix( indx=0 ):
   modelView = np.ones(16)
   glMatrixMode(GL_MODELVIEW)
   glPushMatrix()
   glLoadIdentity()
   glRotatef(-viewRotation[0], 1.0, 0.0, 0.0)
   glRotatef(-viewRotation[1], 0.0, 1.0, 0.0)
+  if indx == 1:
+    glRotatef(-separation, 0.0, 1.0, 0.0)
+    # glTranslatef(-separation/2., 0.0, 0.0 )
+  if indx == 2:
+    glRotatef( separation, 0.0, 1.0, 0.0)
+    # glTranslatef( separation/2., 0.0, 0.0 )
   glTranslatef(-viewTranslation[0], -viewTranslation[1], -viewTranslation[2])
+
   modelView = glGetFloatv(GL_MODELVIEW_MATRIX )
+  modelView_copy = modelView.copy()
   modelView = modelView.reshape(16).astype(np.float32)
+  # print modelView
   glPopMatrix()
-  #invViewMatrix_h = modelView[:12]
-  invViewMatrix_h[0] = modelView[0]/scaleX
-  invViewMatrix_h[1] = modelView[4]
-  invViewMatrix_h[2] = modelView[8]
-  invViewMatrix_h[3] = modelView[12]
-  invViewMatrix_h[4] = modelView[1]
-  invViewMatrix_h[5] = modelView[5]
-  invViewMatrix_h[6] = modelView[9]
-  invViewMatrix_h[7] = modelView[13]
-  invViewMatrix_h[8] = modelView[2]
-  invViewMatrix_h[9] = modelView[6]
-  invViewMatrix_h[10] = modelView[10]
-  invViewMatrix_h[11] = modelView[14]
+  return modelView
+
+
+def display():
+  global viewRotation, viewTranslation, invViewMatrix_h, invViewMatrix_h_1
+  global timer
+
+  timer = time.time()
+  stepFunc()
+
+  if nTextures == 1:
+    modelView = get_model_view_matrix()
+    invViewMatrix_h[0] = -modelView[0]/scaleX
+    invViewMatrix_h[1] = -modelView[4]
+    invViewMatrix_h[2] = -modelView[8]
+    invViewMatrix_h[3] = -modelView[12]
+    invViewMatrix_h[4] = -modelView[1]
+    invViewMatrix_h[5] = -modelView[5]
+    invViewMatrix_h[6] = -modelView[9]
+    invViewMatrix_h[7] = -modelView[13]
+    invViewMatrix_h[8] = -modelView[2]
+    invViewMatrix_h[9] = -modelView[6]
+    invViewMatrix_h[10] = -modelView[10]
+    invViewMatrix_h[11] = -modelView[14]
+
+  if nTextures == 2:
+    modelView = get_model_view_matrix(1)
+    invViewMatrix_h[0] = modelView[0]/scaleX
+    invViewMatrix_h[1] = modelView[4]
+    invViewMatrix_h[2] = modelView[8]
+    invViewMatrix_h[3] = modelView[12]
+    invViewMatrix_h[4] = modelView[1]
+    invViewMatrix_h[5] = modelView[5]
+    invViewMatrix_h[6] = modelView[9]
+    invViewMatrix_h[7] = modelView[13]
+    invViewMatrix_h[8] = modelView[2]
+    invViewMatrix_h[9] = modelView[6]
+    invViewMatrix_h[10] = modelView[10]
+    invViewMatrix_h[11] = modelView[14]
+    # invViewMatrix_h = invViewMatrix_h
+
+    modelView = get_model_view_matrix(2)
+    invViewMatrix_h_1[0] = modelView[0]/scaleX
+    invViewMatrix_h_1[1] = modelView[4]
+    invViewMatrix_h_1[2] = modelView[8]
+    invViewMatrix_h_1[3] = modelView[12]
+    invViewMatrix_h_1[4] = modelView[1]
+    invViewMatrix_h_1[5] = modelView[5]
+    invViewMatrix_h_1[6] = modelView[9]
+    invViewMatrix_h_1[7] = modelView[13]
+    invViewMatrix_h_1[8] = modelView[2]
+    invViewMatrix_h_1[9] = modelView[6]
+    invViewMatrix_h_1[10] = modelView[10]
+    invViewMatrix_h_1[11] = modelView[14]
+
+    # invViewMatrix_h_1 = invViewMatrix_h.copy()
+  # print modelView
+  # invViewMatrix_h = modelView[:12]
+  # invViewMatrix_h = modelView.copy()
+
+
   render()
    # display results
   glClear(GL_COLOR_BUFFER_BIT)
@@ -206,8 +301,43 @@ def display():
     else: glVertex2f(-0.5, 0.5)
     glEnd()
 
-    #glDisable(GL_TEXTURE_2D)
+    # glDisable(GL_TEXTURE_2D)
     glBindTexture(GL_TEXTURE_2D, 0)
+    #
+    # # modelView = np.ones(16)
+    # glMatrixMode(GL_MODELVIEW)
+    # glPushMatrix()
+    # glLoadIdentity()
+    # glTranslatef(-viewTranslation[0], -viewTranslation[1], -viewTranslation[2])
+    # # glRotatef(viewRotation[0], 1.0, 0.0, 0.0)
+    # glRotatef(-viewRotation[1], 0.0, 1.0, 0.0)
+    # # print viewTranslation
+    # # modelView = glGetFloatv(GL_MODELVIEW_MATRIX )
+    # # modelView = modelView.reshape(16).astype(np.float32)
+    # # new_matrix = np.eye(4,4).astype(np.float32)
+    # # new_matrix = new_matrix.reshape(16)
+    # # new_matrix[0] = invViewMatrix_h[0]/scaleX
+    # # new_matrix[4] = invViewMatrix_h[1]
+    # # new_matrix[8] = invViewMatrix_h[2]
+    # # new_matrix[12] = invViewMatrix_h[3]
+    # # new_matrix[1] = invViewMatrix_h[4]
+    # # new_matrix[5] = invViewMatrix_h[5]
+    # # new_matrix[9] = invViewMatrix_h[6]
+    # # new_matrix[13] = invViewMatrix_h[7]
+    # # new_matrix[2] = invViewMatrix_h[8]
+    # # new_matrix[6] = invViewMatrix_h[9]
+    # # new_matrix[10] = invViewMatrix_h[10]
+    # # new_matrix[14] =  invViewMatrix_h[11]
+    # # print new_matrix
+    # # new_matrix = new_matrix.reshape(4,4)
+    # # glLoadMatrixf(new_matrix)
+    # glBegin(GL_LINES);
+    # glVertex3f(-0.5, 0.5, 0 );
+    # glVertex3f(0.5, 0.5,  0);
+    # glEnd();
+    # glPopMatrix()
+
+
 
   glutSwapBuffers();
   timer = time.time() - timer
@@ -260,39 +390,36 @@ def initPixelBuffer():
   #print "Texture Created"
 
 
-colorMap = 'nipy_spectral'
 
 
-colorMaps = ['nipy_spectral', 'viridis',  'inferno', 'bone', 'hot', 'CMRmap', 'copper']
-cmap_indx = 0
 
-transp_center = 0
-transp_ramp = 1
-
-
-def set_transfer_function( ):
-  global transp_ramp, transp_center
+def set_transfer_function( cmap_indx, transp_ramp, transp_center ):
+  # global transp_ramp, transp_center
   colorMap = colorMaps[cmap_indx]
   norm = cl.Normalize(vmin=0, vmax=1, clip=False)
   cmap = cm.ScalarMappable( norm=norm, cmap=colorMap)
-  colorVals = np.linspace(1,0,256)
+  colorVals = np.linspace(1,0,257)
   colorData = cmap.to_rgba(colorVals).astype(np.float32)
-  transp_vals = np.linspace(1,-1,256)
-  transparency = sigmoid( transp_vals, transp_center, transp_ramp )
+  transp_vals = np.linspace(1,-1,257)
+  if transp_type=='sigmoid':transparency = sigmoid( transp_vals, transp_center, transp_ramp )
+  if transp_type=='gaussian':transparency = gaussian( transp_vals, transp_center, transp_ramp )
   colorData[:,3] = (colorVals**transp_ramp).astype(np.float32)
+  colorData[:,3] = (transparency ).astype(np.float32)
+  colorData[0,:] = 1
+
   print colorMap, transp_ramp, transp_center
 
 
-  transferFunc = np.array([
-    [  1.0, 0.0, 0.0, 1.0, ],
-    [  1.0, 0.0, 0.0, 1.0, ],
-    [  1.0, 0.5, 0.0, 1.0, ],
-    [  1.0, 1.0, 0.0, 1.0, ],
-    [  0.0, 1.0, 0.0, 1.0, ],
-    [  0.0, 1.0, 1.0, 1.0, ],
-    [  0.0, 0.0, 1.0, 1.0, ],
-    [  0.4, 0.0, 1.0, 1.0, ],
-    [  0.0, 0.0, 0.0, 0.0, ]]).astype(np.float32)
+  # transferFunc = np.array([
+  #   [  1.0, 0.0, 0.0, 1.0, ],
+  #   [  1.0, 0.0, 0.0, 1.0, ],
+  #   [  1.0, 0.5, 0.0, 1.0, ],
+  #   [  1.0, 1.0, 0.0, 1.0, ],
+  #   [  0.0, 1.0, 0.0, 1.0, ],
+  #   [  0.0, 1.0, 1.0, 1.0, ],
+  #   [  0.0, 0.0, 1.0, 1.0, ],
+  #   [  0.4, 0.0, 1.0, 1.0, ],
+  #   [  0.0, 0.0, 0.0, 0.0, ]]).astype(np.float32)
   transferFunc = colorData.copy()
   transferFuncArray_d, desc = np2DtoCudaArray( transferFunc )
   transferTex.set_flags(cuda.TRSF_NORMALIZED_COORDINATES)
@@ -327,12 +454,13 @@ def initCUDA():
   tex.set_address_mode(1, cuda.address_mode.CLAMP)
   tex.set_array(plotData_dArray)
 
-  set_transfer_function(  )
+  set_transfer_function( cmap_indx_0, trans_ramp_0, trans_center_0 )
   print "CUDA volumeRender initialized\n"
 
 
 def keyboard(*args):
-  global transferScale, brightness, density, transferOffset
+  global transferScale, brightness, density, transferOffset, cmap_indx_0
+  global separation
   ESCAPE = '\033'
   # If escape is pressed, kill everything.
   if args[0] == ESCAPE:
@@ -363,6 +491,16 @@ def keyboard(*args):
   if args[0] == '6':
     transferOffset -= np.float32(0.01)
     print "Image Offset : ", transferOffset
+  if args[0] == '0':
+    cmap_indx_0+=1
+    if cmap_indx_0==len(colorMaps): cmap_indx_0=0
+  if args[0] == 's': save_image()
+  if args[0] == 'a':
+    separation += np.float32(0.05)
+    print separation
+  if args[0] == 'z':
+    separation -= np.float32(0.05)
+    print separation
 
 
 def specialKeys( key, x, y ):

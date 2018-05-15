@@ -96,8 +96,8 @@ extern "C"{
 	  float density, float brightness,
 	  float transferOffset, float transferScale)
   {
-      const int maxSteps = 500;
-      const float tstep = 0.01f;
+      const int maxSteps = 700;
+      const float tstep = 0.005f;
       const float opacityThreshold = 0.95f;
       const float3 boxMin = make_float3(-1.0f, -1.0f, -1.0f);
       const float3 boxMax = make_float3(1.0f, 1.0f, 1.0f);
@@ -145,7 +145,7 @@ extern "C"{
 	  col.w *= density;
 
 	  // "under" operator for back-to-front blending
-	  //sum = lerp(sum, col, col.w);
+	  // sum = lerp(sum, col, col.w);
 
 	  // pre-multiply alpha
 	  col.x *= col.w;
